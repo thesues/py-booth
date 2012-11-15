@@ -15,7 +15,9 @@ VERSION = 0.1
 
 #renew is much like prepare, but it requires acceptor to check
 #the previous instance_number
-PREPARE, PROPOSE, LEARN, ACCEPT, RENEW = ('PREPARE', 'PROPOSE', 'LEARN', 'ACCEPT', 'RENEW')
+PREPARE, LEARN, ACCEPT, RENEW = ('PREPARE', 'LEARN', 'ACCEPT', 'RENEW')
+
+ECHO_PREPARE, ECHO_ACCEPT = ('ECHO_PREPARE', 'ECHO_ACCEPT')
 
 ACK, NACK, OUTDATE = ('ACK', 'NACK', 'OUTDATE')
 
@@ -31,13 +33,18 @@ class Message(object):
         self.suggested_host = kwargs.get('suggested_host')
         self.ballot = kwargs.get('ballot')
         self.instance_number = kwargs.get('instance_number')
+        self.echo= kwargs.get('echo')
     def add_sid(self, sid):
         self.sid = sid
+    def add_echo(self,state):
+        self.echo = state
     def enpack(self):
         msg = json.dumps(dict(method=self.method,sid=self.sid,
             ballot=self.ballot, suggested_host=self.suggested_host,
             suggested_host_timeout=self.suggested_host_timeout,
-            instance_number=self.instance_number))
+            instance_number=self.instance_number,
+            echo=self.echo
+            ))
         return msg
     #TODO depack format check
     def depack(self, d):
@@ -56,6 +63,7 @@ class Message(object):
         self.instance_number = data.get('instance_number')
         self.suggested_host = data.get('suggested_host')
         self.suggested_host_timeout = data.get('suggested_host_timeout')
+        self.echo = data.get('echo')
         return True
     def __str__(self):
         return self.enpack();
@@ -197,6 +205,7 @@ class Acceptor(EventThread):
 
             #update dict to add sid
             m.add_sid(conf.myself.sid)
+            m.add_echo(ECHO_PREPARE)
             do_send(msg.sid, m.enpack())
             log.debug('ACCEPTOR: response from on_prepare %s', m.enpack())
 
@@ -251,6 +260,7 @@ class Acceptor(EventThread):
 
         log.debug('ACCEPTOR: response from on_accept %s', m.enpack())
         m.add_sid(conf.myself.sid)
+        m.add_echo(ECHO_ACCEPT)
         do_send(msg.sid, m.enpack())
 
 
@@ -374,6 +384,8 @@ class Proposer(EventThread):
     def _check_majority(self, recv_set):
         #TODO Dose it have other things to do?
         log.debug('CHECK MAJORITY')
+        for k,v in recv_set.iteritems():
+            log.debug("User %d , GOOD %s", k, v)
         return len(recv_set) >= len(conf.server_list)/2 + 1
 
     def _notify_all(self, m):
