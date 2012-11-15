@@ -419,7 +419,11 @@ class Proposer(EventThread):
 
         while True:
             #TODO some timeout maybe happen,to return failed
+            #must be ECHO_PREPARE
             recv_msg = self.queue.get()
+            if recv_msg.echo != ECHO_PREPARE:
+                continue
+
             if recv_msg.method == OUTDATE and msg.instance_number > instance_number:
 
                 log.info('PROPOSER: Multipaxos messages to find current instance')
@@ -493,8 +497,9 @@ class Proposer(EventThread):
         get_majority_accept = False
         while True:
             recv_msg = self.queue.get()
-            #TODO need some validtion
-            #timeout would go
+            if recv_msg.echo != ECHO_ACCEPT:
+                continue
+
             if recv_msg.method == ACK and \
             instance_number == recv_msg.instance_number and \
             suggested_host == recv_msg.suggested_host:
