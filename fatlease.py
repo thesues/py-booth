@@ -80,7 +80,7 @@ class Lease(object):
         self.timeout = None
         self.instance_number = None
     def __str__(self):
-        return "SID: %d, TIMEOUT: %s, ins %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
+        return "SID: %d, TIMEOUT: %s, epoch %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
 
 #when using recv, there are 2 different msg
 # 1. for acceptors , methods are PREPARE, ACCEPT , LEARN, RENEW: go to acceptor
@@ -378,14 +378,14 @@ class Proposer(EventThread):
 
 
     def _increase_ballot(self):
-        return self.ballot + len(conf.server_list) + conf.myself.sid
         log.debug('gernerate new ballot %d', self.ballot)
+        self.ballot += len(conf.server_list) + conf.myself.sid
 
     def _check_majority(self, recv_set):
         #TODO Dose it have other things to do?
         log.debug('CHECK MAJORITY')
         for k,v in recv_set.iteritems():
-            log.debug("User %d , GOOD %s", k, v)
+            log.debug("User %d , Select %s", k, v)
         return len(recv_set) >= len(conf.server_list)/2 + 1
 
     def _notify_all(self, m):
@@ -400,7 +400,7 @@ class Proposer(EventThread):
             instance_number, renew=False):
 
 
-        ballot = self._increase_ballot()
+        self._increase_ballot()
         log.info('Proposer start initiate_consensus')
         #list of ack sid
         recv_set = dict()
@@ -469,7 +469,7 @@ class Proposer(EventThread):
                     max_index = i
 
             #find the max acceptecd host
-            ballot = accepted_hosts[max_index].ballot
+            self.ballot = accepted_hosts[max_index].ballot
             suggested_host = accepted_hosts[max_index].suggested_host
 
             #when acceptor had already acceptor some host, there is two conditions.
@@ -482,7 +482,7 @@ class Proposer(EventThread):
         #normal situation, msg.suggested_host == None
         #start SEND ACCEPT
         accept_msg = Message(method=ACCEPT,
-                ballot=ballot,
+                ballot=self.ballot,
                 instance_number=instance_number,
                 suggested_host=suggested_host,
                 suggested_host_timeout=suggested_host_timeout)
@@ -515,7 +515,7 @@ class Proposer(EventThread):
 
             #start SEND LEARN
             learn_msg = Message(method=LEARN,
-                    ballot=ballot,
+                    ballot=self.ballot,
                     instance_number=instance_number,
                     #maybe use recv_set[conf.myself.sid]
                     #suggested_host=self.accepted_lease.sid,
