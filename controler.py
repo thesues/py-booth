@@ -51,8 +51,9 @@ class _SendWorker(EventThread):
         self._sock.close()
         if(self._recvWorker):
             self._recvWorker.finish()
+        my_queue = _send_queue_map.get(self._sid)
+        my_queue.put('')
         _sender_worker_map.pop(self._sid)
-        log.debug('finish send worker with sid %d', self._sid)
 
     def _run(self):
         try:
@@ -63,6 +64,8 @@ class _SendWorker(EventThread):
                     self._sock.send(struct.pack('=I',len(msg)))
                     self._sock.sendall(msg)
                     log.debug("send msg %s to sid: %s", msg, self._sid)
+                else:
+                    log.debug('finish send worker with sid %d', self._sid)
         except:
             log.error(sys.exc_info())
             log.error("send work Failed to sid %d", self._sid)
