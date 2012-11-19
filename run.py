@@ -22,7 +22,7 @@ if __name__  == '__main__':
     acceptor = Acceptor(delegate)
     proposer = Proposer(delegate)
     #60 == lease expire time
-    lease_manager = LeaseManager(proposer, acceptor, 60)
+    lease_manager = LeaseManager(proposer, acceptor, conf.lease_timeout)
     admin = LeaseAdmin(1234 + conf.myself.sid,lease_manager)
 
 

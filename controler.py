@@ -62,7 +62,7 @@ class _SendWorker(EventThread):
                 if msg:
                     self._sock.send(struct.pack('=I',len(msg)))
                     self._sock.sendall(msg)
-                    log.debug("send msg %s", msg)
+                    log.debug("send msg %s to sid: %s", msg, self._sid)
         except:
             log.error(sys.exc_info())
             log.error("send work Failed to sid %d", self._sid)

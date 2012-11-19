@@ -5,10 +5,11 @@ import logging
 server_list =None
 myself = None
 interact_mode = True
+lease_timeout = 120
 d_max = 1
 require_retry_times = 3
-connect_timeout = 30
-proposer_timeout = 10
+proposer_timeout = 40
+renew_internal = 30
 
 def initlog(logfile):
     log = logging.getLogger()

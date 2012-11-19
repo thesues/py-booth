@@ -260,9 +260,9 @@ class Acceptor(EventThread):
             m = Message(method=NACK,
                     instance_number=self.instance_number)
 
-        log.debug('ACCEPTOR: response from on_accept %s', m.enpack())
         m.add_sid(conf.myself.sid)
         m.add_echo(ECHO_ACCEPT)
+        log.debug('ACCEPTOR: response from on_accept %s', m.enpack())
         do_send(msg.sid, m.enpack())
 
 
@@ -583,8 +583,6 @@ class RenewLeaseThread(EventThread):
     def __init__(self, lease_manager):
         self._stop = True
         self.lease_manager = lease_manager
-        #here 40 must smaller than TIMEOUT
-        self.internal = 50
 
     def stop(self):
         self._stop= True
@@ -598,9 +596,10 @@ class RenewLeaseThread(EventThread):
             log.info("RenewThread is running")
             time_to_expire = self.lease_manager.acceptor.last_lease.timeout - get_utc_time()
             log.info("time_to_expire %d", time_to_expire)
-            sleep(min(self.internal, time_to_expire))
+            sleep(min(conf.renew_internal , time_to_expire))
             if not self._stop:
                 self.lease_manager.renew_lease()
+                sleep(1)
         log.info("RenewThread is closed")
 
 
@@ -631,6 +630,7 @@ class RequireLeaseThread(EventThread):
             if (lease_status == OUTDATE or lease_status == LOCALLY_UNKNOWN) and not self._stop:
                 log.info("LEASE is MISSING, ACQUIRE IT!")
                 self.lease_manager.require_lease(sync=True)
+                sleep(1)
             elif not self._stop:
                 sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
 
@@ -752,7 +752,8 @@ class LeaseManager(object):
         return self.acceptor.check_local_state()
 
     def catchup_lease(self):
-        self.propser.start(None,
+        self.propser.wait_sync()
+        self.propser.start_sync(None,
                 get_utc_time() + self.lease_timeout,
                 self.acceptor.get_instance_number())
         return self.acceptor.check_local_state()
