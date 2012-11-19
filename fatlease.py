@@ -11,7 +11,7 @@ import conf
 
 
 
-VERSION = 0.1
+VERSION = (0,0,1)
 
 #renew is much like prepare, but it requires acceptor to check
 #the previous instance_number
@@ -20,6 +20,8 @@ PREPARE, LEARN, ACCEPT, RENEW = ('PREPARE', 'LEARN', 'ACCEPT', 'RENEW')
 ECHO_PREPARE, ECHO_ACCEPT = ('ECHO_PREPARE', 'ECHO_ACCEPT')
 
 ACK, NACK, OUTDATE = ('ACK', 'NACK', 'OUTDATE')
+
+REVOKING = 'REVOKING'
 
 #lease stat
 OUTDATE, LOCALLY_UNKNOWN, WAIT = ('OUTDATE', 'LOCALLY_UNKNOWN', 'WAIT')
@@ -80,7 +82,7 @@ class Lease(object):
         self.timeout = None
         self.instance_number = None
     def __str__(self):
-        return "SID: %d, TIMEOUT: %s, epoch %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
+        return "SID: %s, TIMEOUT: %s, epoch %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
 
 #when using recv, there are 2 different msg
 # 1. for acceptors , methods are PREPARE, ACCEPT , LEARN, RENEW: go to acceptor
@@ -149,7 +151,7 @@ class Acceptor(EventThread):
             if  msg.instance_number > self.instance_number:
                 #local acceptor has missed some instacne
                 #work instance_number or last lease instance_number?
-                if msg.method ==RENEW and self.last_lease.sid and \
+                if msg.method == RENEW and self.last_lease.sid and \
                         msg.instance_number == self.last_lease.instance_number + 1:
 
                     log.info('ACCEPTOR: agree to RENEW msg')
@@ -266,11 +268,12 @@ class Acceptor(EventThread):
 
     def on_learn(self, msg):
         log.info('ACCEPTOR: start on_learn')
+        tmp_last_lease_timeout = self.last_lease.timeout
+
         if msg.instance_number > self.instance_number:
             log.info('ACCEPTOR: instance number is unknown and needs to be created')
             self.last_lease.sid = msg.suggested_host
             self.last_lease.timeout = msg.suggested_host_timeout
-            self.accepted_lease.sid = None
             self.accepted_lease.sid = None
             self.ballot = 0
             self.instance_number = msg.instance_number
@@ -278,10 +281,12 @@ class Acceptor(EventThread):
             log.info(msg)
             log.info('ACCEPTOR: instance number is known')
             log.info('the consensus outcome (lease) is stored in the instance')
+            #when in revoke situation, this is usefull
+            self.accepted_lease.sid = msg.suggested_host
+            #when in revoke situation, this is usefull
             self.last_lease.sid = msg.suggested_host
             self.last_lease.timeout = msg.suggested_host_timeout
             self.last_lease.instance_number = self.instance_number
-            log.info('LEARN %s,%s', msg.suggested_host, msg.suggested_host_timeout)
             log.info('LEASE %s', self.last_lease)
 
         #fire timer
@@ -294,6 +299,19 @@ class Acceptor(EventThread):
         if self.lease_manager.expire_thread:
             self.lease_manager.expire_thread.stop()
 
+
+        #when in revoking
+        if self.last_lease.sid == REVOKING:
+            #calculate revoking time
+            if tmp_last_lease_timeout:
+                resume_timeout = tmp_last_lease_timeout + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
+            else:
+                resume_timeout = get_utc_time() + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
+            #start revoking timer, after resume_timeout , set accepted and last lease to None,
+            #which means the revoking is finally finished.
+            self.last_lease.timeout = resume_timeout
+            self.lease_manager.revoking_timeout_thread.start(resume_timeout)
+            return
 
         if self.last_lease.sid == conf.myself.sid:
             self.lease_manager.renew_thread = RenewLeaseThread(self.lease_manager)
@@ -317,7 +335,9 @@ class Acceptor(EventThread):
 
 
     def check_local_state(self):
-        if self.last_lease.sid == None:
+        if self.last_lease.sid == REVOKING:
+            return self.last_lease
+        elif self.last_lease.sid == None:
             #no local information available
             log.info('check local state , no local information available')
             return LOCALLY_UNKNOWN
@@ -342,14 +362,14 @@ class Acceptor(EventThread):
                 return WAIT
 
 
-class Proposer(EventThread):
+class Proposer():
     def __init__(self, dispatcher):
         self.ballot = 0
         self.queue = dispatcher.proposer_queue
         #self.last_lease = Lease()
         #self.accepted_lease = Lease()
         #self.instance_number=0
-        self.runing = False
+        self.running = False
 
     #def get_instance_number(self):
     #    return self.instance_number;
@@ -359,7 +379,7 @@ class Proposer(EventThread):
             self.queue.get_nowait()
 
     def _run(self,*args):
-        timeout = Timeout(12)
+        timeout = Timeout(conf.proposer_timeout)
         try:
             self.initiate_consensus(*args)
         except Timeout, t:
@@ -369,12 +389,25 @@ class Proposer(EventThread):
         finally:
             timeout.cancel()
             self.clear_queue()
-            self.runing = False
+            self.running = False
 
-    def start(self, *args):
-        if not self.runing:
-            self.runing = True
-            super(Proposer, self).start(*args)
+    #def start_async(self, *args):
+        #log.debug('start_async')
+        #if not self.running:
+            #self.running = True
+            #super(Proposer, self).start(*args)
+
+
+    def wait_sync(self):
+        while self.running:
+            log.debug('propser\'s running,waiting')
+            sleep(1);
+
+    def start_sync(self, *args):
+        log.debug('start_sync')
+        if not self.running:
+            self.running = True
+            self._run(*args)
 
 
     def _increase_ballot(self):
@@ -397,7 +430,7 @@ class Proposer(EventThread):
     #only one initiate_consensus could run in the same time
     #TODO need error handle
     def initiate_consensus(self, suggested_host, suggested_host_timeout,
-            instance_number, renew=False):
+            instance_number, renew=False, revoke=False):
 
 
         self._increase_ballot()
@@ -519,15 +552,19 @@ class Proposer(EventThread):
             self.ballot = recv_msg.ballot
 
             #start SEND LEARN
-            learn_msg = Message(method=LEARN,
-                    ballot=self.ballot,
-                    instance_number=instance_number,
-                    #maybe use recv_set[conf.myself.sid]
-                    #suggested_host=self.accepted_lease.sid,
-                    #suggested_host=recv_set[conf.myself.sid].suggested_host,
-                    #suggested_host_timeout=recv_set[conf.myself.sid].suggested_host_timeout)
-                    suggested_host=suggested_host,
-                    suggested_host_timeout=suggested_host_timeout)
+            if not revoke:
+                learn_msg = Message(method=LEARN,
+                        ballot=self.ballot,
+                        instance_number=instance_number,
+                        suggested_host=suggested_host,
+                        suggested_host_timeout=suggested_host_timeout)
+            else:
+                learn_msg = Message(method=LEARN,
+                        ballot=self.ballot,
+                        instance_number=instance_number,
+                        suggested_host=REVOKING,
+                        suggested_host_timeout=0)
+
 
             #store information
             self._notify_all(learn_msg)
@@ -564,7 +601,6 @@ class RenewLeaseThread(EventThread):
             sleep(min(self.internal, time_to_expire))
             if not self._stop:
                 self.lease_manager.renew_lease()
-                sleep(10)
         log.info("RenewThread is closed")
 
 
@@ -581,7 +617,9 @@ class RequireLeaseThread(EventThread):
         self._stop= True
 
     def _run(self):
-        while not self._stop and self.lease_manager.acceptor.last_lease.sid != conf.myself.sid:
+        retries = 0
+        while not self._stop and self.lease_manager.acceptor.last_lease.sid != conf.myself.sid and retries < conf.require_retry_times:
+            retries += 1;
             lease_status = self.lease_manager.lease_status()
             #sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
             log.info("RequireLeaseThread is running %s", lease_status)
@@ -592,15 +630,34 @@ class RequireLeaseThread(EventThread):
 
             if (lease_status == OUTDATE or lease_status == LOCALLY_UNKNOWN) and not self._stop:
                 log.info("LEASE is MISSING, ACQUIRE IT!")
-                self.lease_manager.require_lease()
-                sleep(10)
+                self.lease_manager.require_lease(sync=True)
             elif not self._stop:
                 sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
 
         log.info("RequireLeaseThread is close")
 
+#not need to update timer ,this is different from other timer ,such as
+#renew_thread, require_thread
+class RevokingTimeoutThread(EventThread):
+    def __init__(self, lease_manager):
+        self.lease_manager = lease_manager
+        self.resume_timeout = None
+        self.running = False
 
-#FIXME:revoke situation
+    def start(self, *args):
+        if not self.running:
+            super(RevokingTimeoutThread, self).start(*args)
+
+    def _run(self, resume_timeout):
+        self.running = True
+        self.resume_timeout = resume_timeout
+        log.debug('start sleep to ensure remote requires stop, system OK on %s', time.ctime(self.resume_timeout))
+        sleep(resume_timeout - get_utc_time() + 1)
+        self.lease_manager.acceptor.accepted_lease.set_none()
+        self.lease_manager.acceptor.last_lease.set_none()
+        log.debug('RevokingTimeoutThread finished')
+        self.running = False
+
 class ExpireLeaseThread(EventThread):
     def __init__(self, lease_manager):
         self._stop = True
@@ -651,28 +708,7 @@ class LeaseManager(object):
         #self.require_thead = RequireLeaseThread(self)
         self.require_thead = None
         self.expire_thread = None
-
-        #expire timer to make
-        #self.expire_timer = None
-
-
-#    def clean_expire_timer(self):
-#        if self.expire_timer:
-#            self.expire_timer.cancel()
-#        self.expire_timer = None
-
-#    def create_expire_timer(self, lease):
-#        self.expire_timer = Timer((lease.timeout - get_utc_time()), self.expire_lease)
-#        self.expire_timer.schedule()
-#
-#    def expire_lease(self):
-#        #clean own lease/stop renew
-#        self.renew_thread.stop()
-#        #FIXME maybe have issue
-#        log.info('Run expire lease,your lease has missed')
-#        self.acceptor.last_lease.set_none()
-#        self.acceptor.accepted_lease.set_none()
-
+        self.revoking_timeout_thread = RevokingTimeoutThread(self)
 
     def set_propser(self, propser):
         self.propser = propser
@@ -682,25 +718,31 @@ class LeaseManager(object):
 
     #run in timeout and command mode
     #tell the difference between NORMAL and AUTOMATIC
-    def require_lease(self):
+    def require_lease(self, sync):
+
+        if sync:
+            start = self.propser.start_sync
+            self.propser.wait_sync()
+        else:
+            start = self.propser.start_async
+
         while True:
-            x = self.acceptor.check_local_state()
+            x = self.lease_status()
             if x == OUTDATE:
                 #the local information is outdated
                 #next information is used
-                self.propser.start(conf.myself.sid,
+                start(conf.myself.sid,
                         get_utc_time() + self.lease_timeout,
                         self.acceptor.get_instance_number()+1)
                 return
             elif x == LOCALLY_UNKNOWN:
                 #no information, means ticket is empty,
                 #could grant
-                self.propser.start(conf.myself.sid,
+                start(conf.myself.sid,
                         get_utc_time() + self.lease_timeout,
                         self.acceptor.get_instance_number())
                 return
             elif x == WAIT:
-                 #FIXME sleep?
                  sleep(conf.d_max)
                  continue;
             else:
@@ -721,10 +763,25 @@ class LeaseManager(object):
         lease = self.lease_status()
         if lease not in (OUTDATE, WAIT, LOCALLY_UNKNOWN):
             if lease.sid == conf.myself.sid:
-                self.propser.start(conf.myself.sid,
+                self.propser.wait_sync()
+                self.propser.start_sync(conf.myself.sid,
                         get_utc_time() + self.lease_timeout,
                         self.acceptor.last_lease.instance_number + 1, True)
 
+    def revoke_lease(self):
+        #ensure we have last_lease
+        lease = self.lease_status()
+        if lease not in (OUTDATE, WAIT, LOCALLY_UNKNOWN):
+            if lease.sid == conf.myself.sid:
+                if self.renew_thread:
+                    self.renew_thread.stop()
+                    self.renew_thread = None
+                log.debug("revoke start")
+                self.propser.wait_sync()
+                self.propser.start_sync(conf.myself.sid,
+                        get_utc_time() + self.lease_timeout,
+                        self.acceptor.last_lease.instance_number + 1, True,True)
+                log.debug("revoke end")
 
 class LeaseAdmin(Admin):
     def __init__(self,port, lease_manager):
@@ -741,12 +798,11 @@ class LeaseAdmin(Admin):
 
     @public
     def lease_acquire(self, *args):
-        return self.lease_manager.require_lease()
+        return self.lease_manager.require_lease(sync=True)
 
     @public
     def lease_revoke(self, *args):
-        pass
-
+        return self.lease_manager.revoke_lease()
 
 #unix format
 #from Ruslan's Blog
