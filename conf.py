@@ -5,7 +5,7 @@ import logging
 server_list =None
 myself = None
 interact_mode = True
-lease_timeout = 120
+lease_timeout = 60
 d_max = 1
 require_retry_times = 3
 proposer_timeout = 40

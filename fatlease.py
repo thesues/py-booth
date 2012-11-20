@@ -1,4 +1,4 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
+# vim: tabstop=4 shiftwidth=4 softtabstop=4 expandtab
 from datetime import datetime
 import calendar
 import time
@@ -206,10 +206,10 @@ class Acceptor(EventThread):
                             suggested_host_timeout=None)
 
             #update dict to add sid
-            m.add_sid(conf.myself.sid)
-            m.add_echo(ECHO_PREPARE)
-            do_send(msg.sid, m.enpack())
-            log.debug('ACCEPTOR: response from on_prepare %s', m.enpack())
+        m.add_sid(conf.myself.sid)
+        m.add_echo(ECHO_PREPARE)
+        do_send(msg.sid, m.enpack())
+        log.debug('ACCEPTOR: response from on_prepare %s', m.enpack())
 
     def on_accept(self,msg):
         log.info('ACCEPTOR: start on_accept')
@@ -457,19 +457,19 @@ class Proposer():
             if recv_msg.echo != ECHO_PREPARE:
                 continue
 
-            if recv_msg.method == OUTDATE and msg.instance_number > instance_number:
+            if recv_msg.method == OUTDATE and recv_msg.instance_number > instance_number:
 
                 log.info('PROPOSER: Multipaxos messages to find current instance')
 
-                self.last_lease.sid = None
-                self.last_lease.timeout = None
-                self.accepted_lease.sid = recv_msg.suggested_host
-                self.accepted_lease.timeout = recv_msg.suggested_host_timeout
+                #self.last_lease.sid = None
+                #self.last_lease.timeout = None
+                suggested_host = recv_msg.suggested_host
+                suggested_host_timeout = recv_msg.suggested_host_timeout
                 self.ballot = recv_msg.ballot
-
                 instance_number = recv_msg.instance_number
-                self.initiate_consensus(suggested_host, suggested_host_timeout,
-                        recv_msg.instance_number)
+
+                self.initiate_consensus(suggested_host , suggested_host_timeout,
+                        instance_number)
 
             elif recv_msg.method == NACK and \
                     recv_msg.ballot > self.ballot and \
