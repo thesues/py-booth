@@ -310,6 +310,7 @@ class Acceptor(EventThread):
             #start revoking timer, after resume_timeout , set accepted and last lease to None,
             #which means the revoking is finally finished.
             self.last_lease.timeout = resume_timeout
+            #if revoking_timeout_thread is running, start will not work
             self.lease_manager.revoking_timeout_thread.start(resume_timeout)
             return
 
@@ -470,6 +471,7 @@ class Proposer():
 
                 self.initiate_consensus(suggested_host , suggested_host_timeout,
                         instance_number)
+                return
 
             elif recv_msg.method == NACK and \
                     recv_msg.ballot > self.ballot and \
@@ -481,6 +483,7 @@ class Proposer():
                 sleep(1)
                 self.initiate_consensus(suggested_host, suggested_host_timeout,
                         instance_number)
+                return
             elif recv_msg.method == ACK and \
                     recv_msg.instance_number == instance_number and \
                     recv_msg.ballot >= self.ballot:
@@ -565,15 +568,8 @@ class Proposer():
                         suggested_host=REVOKING,
                         suggested_host_timeout=0)
 
-
             #store information
             self._notify_all(learn_msg)
-        else:
-            #wait for some time
-            #TODO random time
-            sleep(1)
-            self.initiate_consensus(suggested_host, suggested_host_timeout,
-                    instance_number)
 
 
 
@@ -629,7 +625,7 @@ class RequireLeaseThread(EventThread):
 
             if (lease_status == OUTDATE or lease_status == LOCALLY_UNKNOWN) and not self._stop:
                 log.info("LEASE is MISSING, ACQUIRE IT!")
-                self.lease_manager.require_lease(sync=True)
+                self.lease_manager.require_lease()
                 sleep(1)
             elif not self._stop:
                 sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
@@ -718,27 +714,22 @@ class LeaseManager(object):
 
     #run in timeout and command mode
     #tell the difference between NORMAL and AUTOMATIC
-    def require_lease(self, sync):
-
-        if sync:
-            start = self.propser.start_sync
-            self.propser.wait_sync()
-        else:
-            start = self.propser.start_async
-
+    def require_lease(self):
         while True:
             x = self.lease_status()
             if x == OUTDATE:
                 #the local information is outdated
                 #next information is used
-                start(conf.myself.sid,
+                self.propser.wait_sync()
+                self.propser.start_sync(conf.myself.sid,
                         get_utc_time() + self.lease_timeout,
                         self.acceptor.get_instance_number()+1)
                 return
             elif x == LOCALLY_UNKNOWN:
                 #no information, means ticket is empty,
                 #could grant
-                start(conf.myself.sid,
+                self.propser.wait_sync()
+                self.propser.start_sync(conf.myself.sid,
                         get_utc_time() + self.lease_timeout,
                         self.acceptor.get_instance_number())
                 return
@@ -799,7 +790,7 @@ class LeaseAdmin(Admin):
 
     @public
     def lease_acquire(self, *args):
-        return self.lease_manager.require_lease(sync=True)
+        return self.lease_manager.require_lease()
 
     @public
     def lease_revoke(self, *args):
