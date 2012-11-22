@@ -9,6 +9,7 @@ sleep 2
 echo "kill run.py 1"
 pid=$(pgrep -f "run.py 1")
 kill $pid
+
 sleep 3
 
 python run.py 1 &

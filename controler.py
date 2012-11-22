@@ -2,6 +2,8 @@
 import eventlet
 from eventlet.green import socket
 from eventlet import Queue
+from eventlet import kill
+from greenlet import GreenletExit
 import struct
 import sys
 import errno
@@ -29,13 +31,14 @@ _recv_queue = Queue()
 
 class EventThread(object):
     def start(self,*args):
-        _pool.spawn_n(self._run, *args)
+        self.id = _pool.spawn(self._run, *args)
     def _run(self, *args):
         pass
 
+
 class _SendWorker(EventThread):
     def __init__(self, sock, sid):
-        self._sock = sock
+        self._dout = sock.makefile('w')
         self._sid = sid
         self._recvWorker = None
         self._running = True
@@ -46,26 +49,25 @@ class _SendWorker(EventThread):
     def finish(self):
         if not self._running:
             return
-        self._running = False
-        self._sock.shutdown(socket.SHUT_RDWR)
-        self._sock.close()
+        self._dout.close()
         if(self._recvWorker):
             self._recvWorker.finish()
-        my_queue = _send_queue_map.get(self._sid)
-        my_queue.put('')
         _sender_worker_map.pop(self._sid)
+        self._running = False
+        log.debug('finish send worker with sid %d', self._sid)
+        kill(self.id)
+        kill(self._recvWorker.id)
 
     def _run(self):
         try:
             while not _shutdown and self._running:
                 my_queue = _send_queue_map.get(self._sid)
                 msg = my_queue.get()
-                if msg:
-                    self._sock.send(struct.pack('=I',len(msg)))
-                    self._sock.sendall(msg)
-                    log.debug("send msg %s to sid: %s", msg, self._sid)
-                else:
-                    log.debug('finish send worker with sid %d', self._sid)
+                self._dout.write(struct.pack('=I',len(msg)))
+                self._dout.write(msg)
+                self._dout.flush()
+        except GreenletExit, err:
+            pass
         except:
             log.error(sys.exc_info())
             log.error("send work Failed to sid %d", self._sid)
@@ -75,7 +77,6 @@ class _SendWorker(EventThread):
 
 class _RecvWorker(EventThread):
     def __init__(self, sock, sid, sw):
-        self._sock = sock
         self._din = sock.makefile('r')
         self._sid = sid
         self._sw = sw
@@ -85,6 +86,7 @@ class _RecvWorker(EventThread):
         try:
             while not _shutdown and self._running:
 
+                #byte4 = self._sock.recv(4)
                 byte4 = self._din.read(4)
 
                 if byte4 and len(byte4) == 4:
@@ -102,8 +104,9 @@ class _RecvWorker(EventThread):
                 data = self._din.read(length)
                 _recv_queue.put(data)
                 log.debug('received msg %s from sid %d', data, self._sid)
+        except GreenletExit, err:
+            pass
         except:
-            log.error('recv failed')
             log.error(sys.exc_info())
         finally:
             self._sw.finish()
@@ -113,10 +116,10 @@ class _RecvWorker(EventThread):
             return
         self._running = False
         self._din.close()
-        self._sock.close()
         log.debug('finish recv worker with sid %d', self._sid)
 
 def do_send(sid, msg):
+
     if not _send_queue_map.get(sid):
         _send_queue_map[sid] = Queue()
     #loop back
@@ -124,6 +127,7 @@ def do_send(sid, msg):
         _recv_queue.put(msg)
     else:
         _send_queue_map.get(sid).put(msg)
+
     connect_one(sid)
 
 def do_recv():
@@ -133,11 +137,10 @@ def do_recv():
 
 def receive_connection(sock):
     try:
-        din = sock.makefile('r')
-        byte4 = din.read(4)
-        din.close()
+        byte4 = sock.recv(4)
         sid = struct.unpack('=I', byte4)
     except:
+        log.error(sys.exc_info())
         log.error('receive_connection error (receive_connection)')
         sock.close()
         return False
@@ -160,17 +163,18 @@ def receive_connection(sock):
     if sid < conf.myself.sid:
         log.debug('get lower sid %d, I will connection it insdead',sid)
         #FIXME:
-        #sw = _sender_worker_map.get(sid)
+        sw = _sender_worker_map.get(sid)
         #every connect would close old sw/recv thread
-        #if sw:
-        #    sw.finish()
-        #sock.close()
+        if sw:
+            sw.finish()
+        sock.close()
         connect_one(sid)
     #lose the challenge, the connection is OK
     else:
         sw = _SendWorker(sock, sid)
         rw = _RecvWorker(sock, sid, sw)
         sw.set_recv(rw)
+        sock.close()
 
         #add to _sender_worker_map
         vsw = _sender_worker_map.get(sid)
@@ -240,6 +244,7 @@ def initiate_connection(sock, sid):
         sw = _SendWorker(sock, sid)
         rw = _RecvWorker(sock, sid, sw)
         sw.set_recv(rw)
+        sock.close()
 
         #add to _sender_worker_map
         vsw = _sender_worker_map.get(sid)

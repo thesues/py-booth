@@ -47,7 +47,7 @@ class BoothTestCase(unittest.TestCase):
         self.assertEqual(self.c1.recv(1024), '%s CONNECTED\n%s CONNECTED\n%s CONNECTED\n' % (self.s1, self.s2, self.s3))
         self.assertEqual(self.c2.recv(1024), '%s CONNECTED\n%s CONNECTED\n%s CONNECTED\n' % (self.s1, self.s2, self.s3))
         self.assertEqual(self.c3.recv(1024), '%s CONNECTED\n%s CONNECTED\n%s CONNECTED\n' % (self.s1, self.s2, self.s3))
-       
+
     def test_network_disconnect(self):
         self.connect_all()
 
@@ -66,7 +66,7 @@ class BoothTestCase(unittest.TestCase):
 
         self.c3.sendall('network connect 1\n')
         self.c3.recv(1024)
-        time.sleep(2)
+        time.sleep(3)
 
         self.c1.sendall('network list\n')
         self.c3.sendall('network list\n')
@@ -82,7 +82,7 @@ class BoothTestCase(unittest.TestCase):
         self.c2.recv(1024)
         self.c2.recv(1024)
 
-        time.sleep(2)
+        time.sleep(3)
         self.c1.sendall('network list\n')
         self.c2.sendall('network list\n')
         self.c3.sendall('network list\n')
