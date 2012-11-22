@@ -54,8 +54,10 @@ class _SendWorker(EventThread):
             self._recvWorker.finish()
         _sender_worker_map.pop(self._sid)
         self._running = False
-        log.debug('finish send worker with sid %d', self._sid)
         kill(self.id)
+        log.debug('finish send worker with sid %d', self._sid)
+
+    def force_finish(self):
         kill(self._recvWorker.id)
 
     def _run(self):
@@ -370,7 +372,7 @@ network send %s %s
             return 'success'
         x = _sender_worker_map.get(server_sid)
         if x:
-            x.finish()
+            x.force_finish()
             return 'success'
         else:
             return 'no such connection'
