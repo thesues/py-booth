@@ -7,6 +7,7 @@ from controler import EventThread, do_recv, do_send, Admin, public
 from eventlet import Queue
 import logging as log
 from eventlet import sleep, Timeout
+from eventlet import kill
 import conf
 
 
@@ -582,21 +583,24 @@ class RenewLeaseThread(EventThread):
 
     def stop(self):
         self._stop= True
+        kill(self.id)
 
     def start(self, *args):
         self._stop =False
         super(RenewLeaseThread, self).start()
 
     def _run(self):
-        while not self._stop and self.lease_manager.acceptor.last_lease.sid == conf.myself.sid:
-            log.info("RenewThread is running")
-            time_to_expire = self.lease_manager.acceptor.last_lease.timeout - get_utc_time()
-            log.info("time_to_expire %d", time_to_expire)
-            sleep(min(conf.renew_internal , time_to_expire))
-            if not self._stop:
-                self.lease_manager.renew_lease()
-                sleep(1)
-        log.info("RenewThread is closed")
+        try:
+            while not self._stop and self.lease_manager.acceptor.last_lease.sid == conf.myself.sid:
+                log.info("RenewThread is running")
+                time_to_expire = self.lease_manager.acceptor.last_lease.timeout - get_utc_time()
+                log.info("time_to_expire %d", time_to_expire)
+                sleep(min(conf.renew_internal , time_to_expire))
+                if not self._stop:
+                    self.lease_manager.renew_lease()
+                    sleep(1)
+        finally:
+            log.info("RenewThread is closed")
 
 
 class RequireLeaseThread(EventThread):
@@ -610,27 +614,29 @@ class RequireLeaseThread(EventThread):
 
     def stop(self):
         self._stop= True
+        kill(self.id)
 
     def _run(self):
         retries = 0
-        while not self._stop and self.lease_manager.acceptor.last_lease.sid != conf.myself.sid and retries < conf.require_retry_times:
-            retries += 1;
-            lease_status = self.lease_manager.lease_status()
-            #sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
-            log.info("RequireLeaseThread is running %s", lease_status)
-
-            while lease_status == WAIT and not self._stop:
-                sleep(conf.d_max)
+        try:
+            while not self._stop and self.lease_manager.acceptor.last_lease.sid != conf.myself.sid and retries < conf.require_retry_times:
+                retries += 1;
                 lease_status = self.lease_manager.lease_status()
+                #sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
+                log.info("RequireLeaseThread is running %s", lease_status)
 
-            if (lease_status == OUTDATE or lease_status == LOCALLY_UNKNOWN) and not self._stop:
-                log.info("LEASE is MISSING, ACQUIRE IT!")
-                self.lease_manager.require_lease()
-                sleep(1)
-            elif not self._stop:
-                sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
+                while lease_status == WAIT and not self._stop:
+                    sleep(conf.d_max)
+                    lease_status = self.lease_manager.lease_status()
 
-        log.info("RequireLeaseThread is close")
+                if (lease_status == OUTDATE or lease_status == LOCALLY_UNKNOWN) and not self._stop:
+                    log.info("LEASE is MISSING, ACQUIRE IT!")
+                    self.lease_manager.require_lease()
+                    sleep(1)
+                elif not self._stop:
+                    sleep(self.lease_manager.acceptor.last_lease.timeout - get_utc_time())
+        finally:
+            log.info("RequireLeaseThread is close")
 
 #not need to update timer ,this is different from other timer ,such as
 #renew_thread, require_thread
@@ -664,31 +670,29 @@ class ExpireLeaseThread(EventThread):
         super(ExpireLeaseThread, self).start()
 
     def _run(self):
-        while not self._stop:
-            sleep(self.lease_manager.acceptor.last_lease.timeout -get_utc_time())
-
-            #not possible in WAIT
-            #while self.lease_manager.lease_status() == WAIT and not self._stop:
-            #    sleep(conf.d_max)
-
-            log.info("ExpireLeaseThread is running")
-            if self.lease_manager.lease_status() == OUTDATE and not self._stop:
-                log.info("SET NONE!!")
-                self.lease_manager.acceptor.last_lease.sid = None
-                self.lease_manager.acceptor.last_lease.timeout= None
-                self.lease_manager.acceptor.accepted_lease.sid = None
-                self.lease_manager.acceptor.accepted_lease.timeout= None
-                #start require_lease
-                if self.lease_manager.require_thead:
-                    self.lease_manager.require_thead.stop()
-                self.lease_manager.require_thead= RequireLeaseThread(self.lease_manager)
-                self.lease_manager.require_thead.start()
-                break;
-            sleep(conf.d_max)
-        log.info("ExpireLeaseThread is closed")
+        try:
+            while not self._stop:
+                log.info("ExpireLeaseThread is running")
+                sleep(self.lease_manager.acceptor.last_lease.timeout -get_utc_time())
+                if self.lease_manager.lease_status() == OUTDATE and not self._stop:
+                    log.info("SET NONE!!")
+                    self.lease_manager.acceptor.last_lease.sid = None
+                    self.lease_manager.acceptor.last_lease.timeout= None
+                    self.lease_manager.acceptor.accepted_lease.sid = None
+                    self.lease_manager.acceptor.accepted_lease.timeout= None
+                    #start require_lease
+                    if self.lease_manager.require_thead:
+                        self.lease_manager.require_thead.stop()
+                    self.lease_manager.require_thead = RequireLeaseThread(self.lease_manager)
+                    self.lease_manager.require_thead.start()
+                    break;
+                sleep(conf.d_max)
+        finally:
+            log.info("ExpireLeaseThread is closed")
 
     def stop(self):
         self._stop= True
+        kill(self.id)
 
 
 class LeaseManager(object):
