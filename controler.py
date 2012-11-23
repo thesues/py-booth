@@ -74,7 +74,7 @@ class _SendWorker(EventThread):
             log.error(sys.exc_info())
             log.error("send work Failed to sid %d", self._sid)
         finally:
-            self.finish()
+            self.force_finish()
 
 
 class _RecvWorker(EventThread):
