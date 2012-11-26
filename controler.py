@@ -232,6 +232,12 @@ def connect_all():
     for i in conf.server_list.itervalues():
         connect_one(i.sid)
 
+def is_all_connected():
+    for i in conf.server_list.iterkeys():
+        if not _sender_worker_map.has_key(i):
+            return False
+    return True
+
 
 # If this server has initiated the connection, then it gives up on the
 # connection if it loses challenge. Otherwise, it keeps the connection.

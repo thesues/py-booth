@@ -3,7 +3,8 @@ from datetime import datetime
 import calendar
 import time
 import simplejson as json
-from controler import EventThread, do_recv, do_send, Admin, public
+import functools
+from controler import EventThread, do_recv, do_send, Admin, public, is_all_connected, connect_all
 from eventlet import Queue
 import logging as log
 from eventlet import sleep, Timeout
@@ -112,6 +113,7 @@ class Acceptor(EventThread):
         self.accepted_lease = Lease(None, None)
         self.instance_number = 0
         self.queue = dispatcher.acceptor_queue
+        self.running = False
         #need to update proposer's data
 
     def set_lease_manager(self,manager):
@@ -121,6 +123,22 @@ class Acceptor(EventThread):
         return self.instance_number
 
     def _run(self):
+        timeout = Timeout(conf.lease_timeout)
+        connect_all()
+        sleep(1)
+        try:
+          while not is_all_connected():
+              log.debug("wait to connect others")
+              sleep(3)
+              connect_all()
+        except Timeout, t:
+            if t is not timeout:
+                raise
+        finally:
+            timeout.cancel()
+
+        log.info('Now it is safe to start Acceptor')
+        self.running = True
         while True:
             m = self.queue.get()
             #if not m.depack(m):
@@ -302,7 +320,7 @@ class Acceptor(EventThread):
 
 
         #when in revoking
-        if self.last_lease.sid == REVOKING:
+        if self.last_lease.sid == REVOKING and not self.lease_manager.revoking_timeout_thread.running:
             #calculate revoking time
             if tmp_last_lease_timeout:
                 resume_timeout = tmp_last_lease_timeout + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
@@ -310,7 +328,9 @@ class Acceptor(EventThread):
                 resume_timeout = get_utc_time() + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
             #start revoking timer, after resume_timeout , set accepted and last lease to None,
             #which means the revoking is finally finished.
+
             self.last_lease.timeout = resume_timeout
+
             #if revoking_timeout_thread is running, start will not work
             self.lease_manager.revoking_timeout_thread.start(resume_timeout)
             return
@@ -784,19 +804,33 @@ class LeaseAdmin(Admin):
          super(LeaseAdmin, self).__init__(port)
          self.lease_manager = lease_manager
 
+    #use decorator
+    def check_acceptor_running(func):
+        def wrapped(self, *a, **kw):
+            if self.lease_manager.acceptor.running:
+                return func(self, *a, **kw)
+            else:
+                return "In maintaince mode, Acceptor is not running, Please wait"
+        return wrapped
+
+
     @public
+    @check_acceptor_running
     def lease_list(self, *args):
         return self.lease_manager.lease_status()
 
     @public
+    @check_acceptor_running
     def lease_slowlist(self, *args):
         return self.lease_manager.catchup_lease()
 
     @public
+    @check_acceptor_running
     def lease_acquire(self, *args):
         return self.lease_manager.require_lease()
 
     @public
+    @check_acceptor_running
     def lease_revoke(self, *args):
         return self.lease_manager.revoke_lease()
 
