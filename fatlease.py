@@ -100,9 +100,9 @@ class Dispatcher(EventThread):
             m = Message()
             if not m.depack(u):
                 continue
-            if m.method == PREPARE or m.method == ACCEPT or m.method == LEARN or m.method == RENEW:
+            if m.method in (PREPARE, ACCEPT, LEARN, RENEW):
                 self.acceptor_queue.put(m)
-            elif m.method == NACK or m.method == ACK or m.method == OUTDATE:
+            elif m.method in (NACK, ACK, OUTDATE):
                 self.proposer_queue.put(m)
 
 
@@ -306,7 +306,6 @@ class Acceptor(EventThread):
             self.last_lease.sid = msg.suggested_host
             self.last_lease.timeout = msg.suggested_host_timeout
             self.last_lease.instance_number = self.instance_number
-            log.info('LEASE %s', self.last_lease)
 
         #fire timer
         #if I have the lease, start a renew process
@@ -320,41 +319,25 @@ class Acceptor(EventThread):
 
 
         #when in revoking
-        if self.last_lease.sid == REVOKING and not self.lease_manager.revoking_timeout_thread.running:
-            #calculate revoking time
-            if tmp_last_lease_timeout:
-                resume_timeout = tmp_last_lease_timeout + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
-            else:
-                resume_timeout = get_utc_time() + conf.require_retry_times * (conf.proposer_timeout + conf.d_max)
-            #start revoking timer, after resume_timeout , set accepted and last lease to None,
-            #which means the revoking is finally finished.
-
-            self.last_lease.timeout = resume_timeout
-
-            #if revoking_timeout_thread is running, start will not work
-            self.lease_manager.revoking_timeout_thread.start(resume_timeout)
-            return
-
-        if self.last_lease.sid == conf.myself.sid:
-            self.lease_manager.renew_thread = RenewLeaseThread(self.lease_manager)
-            self.lease_manager.renew_thread.start()
-            self.lease_manager.expire_thread = ExpireLeaseThread(self.lease_manager)
-            self.lease_manager.expire_thread.start()
+        if self.last_lease.sid == REVOKING:
+            if not self.lease_manager.revoking_timeout_thread.running:
+                self.lease_manager.revoking_timeout_thread.start(self.last_lease.timeout)
         else:
-            self.lease_manager.require_thead = RequireLeaseThread(self.lease_manager)
-            self.lease_manager.require_thead.start()
+            #myself has lease
+            if self.last_lease.sid == conf.myself.sid:
+                self.lease_manager.renew_thread = RenewLeaseThread(self.lease_manager)
+                self.lease_manager.renew_thread.start()
+                self.lease_manager.expire_thread = ExpireLeaseThread(self.lease_manager)
+                self.lease_manager.expire_thread.start()
+            #others has lease
+            elif self.last_lease.sid:
+                self.lease_manager.require_thead = RequireLeaseThread(self.lease_manager)
+                self.lease_manager.require_thead.start()
+            #no one has the lease
+            else:
+                pass
 
-        #if Others have the lease, start a acquire process
-        #else:
-            #if self.lease_manager.renew_thread:
-                #self.lease_manager.renew_thread.stop()
-            #self.lease_manager.require_thead = RequireLeaseThread(self.lease_manager)
-            #self.lease_manager.require_thead.start()
-
-        #update expire thread
-        #self.lease_manager.clean_expire_timer()
-        #self.lease_manager.create_expire_timer(self.last_lease)
-
+        log.info('LEASE %s', self.last_lease)
 
     def check_local_state(self):
         if self.last_lease.sid == REVOKING:
@@ -587,7 +570,7 @@ class Proposer():
                         ballot=self.ballot,
                         instance_number=instance_number,
                         suggested_host=REVOKING,
-                        suggested_host_timeout=0)
+                        suggested_host_timeout=suggested_host_timeout)
 
             #store information
             self._notify_all(learn_msg)
@@ -716,7 +699,7 @@ class ExpireLeaseThread(EventThread):
 
 
 class LeaseManager(object):
-    def __init__(self,propser,acceptor,timeout):
+    def __init__(self, propser, acceptor, timeout):
         self.lease_timeout = timeout
         self.propser = propser
         self.acceptor = acceptor
@@ -793,9 +776,11 @@ class LeaseManager(object):
                     self.renew_thread.stop()
                     self.renew_thread = None
                 log.debug("revoke start")
+                safe_time = lease.timeout + conf.require_retry_times * \
+                                                (conf.proposer_timeout + conf.d_max)
                 self.propser.wait_sync()
                 self.propser.start_sync(conf.myself.sid,
-                        get_utc_time() + self.lease_timeout,
+                        safe_time,
                         self.acceptor.last_lease.instance_number + 1, True,True)
                 log.debug("revoke end")
 
@@ -804,13 +789,21 @@ class LeaseAdmin(Admin):
          super(LeaseAdmin, self).__init__(port)
          self.lease_manager = lease_manager
 
-    #use decorator
+    #decorator
     def check_acceptor_running(func):
         def wrapped(self, *a, **kw):
             if self.lease_manager.acceptor.running:
                 return func(self, *a, **kw)
             else:
                 return "In maintaince mode, Acceptor is not running, Please wait"
+        return wrapped
+
+    #decorator
+    def add_sleep_after_func(func):
+        def wrapped(self, *a, **kw):
+            func(self, *a , **kw)
+            sleep(1)
+            return self.lease_manager.lease_status()
         return wrapped
 
 
@@ -821,18 +814,21 @@ class LeaseAdmin(Admin):
 
     @public
     @check_acceptor_running
+    @add_sleep_after_func
     def lease_slowlist(self, *args):
-        return self.lease_manager.catchup_lease()
+        self.lease_manager.catchup_lease()
 
     @public
     @check_acceptor_running
+    @add_sleep_after_func
     def lease_acquire(self, *args):
-        return self.lease_manager.require_lease()
+        self.lease_manager.require_lease()
 
     @public
     @check_acceptor_running
+    @add_sleep_after_func
     def lease_revoke(self, *args):
-        return self.lease_manager.revoke_lease()
+        self.lease_manager.revoke_lease()
 
 #unix format
 #from Ruslan's Blog
