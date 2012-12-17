@@ -11,9 +11,8 @@ from controler import Controler
 
 if __name__  == '__main__':
     myid = int(sys.argv[1])
-    conf.interact_mode = True
     if len(sys.argv) > 2:
-        conf.interact_mode = False
+        conf.test_mode = True
 
     conf.read_conf(myid)
 

@@ -6,7 +6,7 @@ import time
 
 class BoothTestCase(unittest.TestCase):
     def setUp(self):
-        os.system('sh test.sh restart')
+        os.system('sh fireup.sh restart')
         self.c1 = socket.socket()
         self.c1.connect(('127.0.0.1',1235))
 
@@ -24,7 +24,7 @@ class BoothTestCase(unittest.TestCase):
         self.c1.close()
         self.c2.close()
         self.c3.close()
-        os.system('sh test.sh stop')
+        os.system('sh fireup.sh stop')
 
     def connect_all(self):
         self.c1.sendall('network connect all\n')
@@ -77,7 +77,6 @@ class BoothTestCase(unittest.TestCase):
         self.c2.sendall('network disconnect 1\n')
         self.c2.sendall('network disconnect 2\n')
         self.c2.sendall('network disconnect 3\n')
-        #omit return value
         self.c2.recv(1024)
         self.c2.recv(1024)
         self.c2.recv(1024)

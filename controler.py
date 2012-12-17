@@ -424,7 +424,7 @@ network send %s %s
         channel = sock.makefile('rw')
         try:
             while not _shutdown:
-                if conf.interact_mode:
+                if not conf.test_mode:
                     self._promote(channel)
 
                 msg = channel.readline()
