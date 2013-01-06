@@ -1,4 +1,4 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
+# vim: tabstop=4 shiftwidth=4 softtabstop=4 et
 import unittest
 import socket
 import os
@@ -14,9 +14,29 @@ def parse_result(string):
         epoch = obj.group(3)
         return dict(sid=sid, timeout=timeout, epoch=epoch)
 
+
+def stop_booth(id):
+    os.system('''pkill -f "run.py %s"''' % id)
+
+def start_booth(id):
+    os.system("python ../run.py %s -t&" % id)
+    time.sleep(2)
+
+def connect_client(id):
+    c = socket.socket()
+    c.connect(('127.0.0.1',1234 + int(id)))
+    return c
+
+def send_cmd(s, msg):
+    if msg[-1] != '\n':
+        msg += '\n'
+    s.sendall(msg)
+    return s.recv(1024)
+
 class BoothTestCase(unittest.TestCase):
     def setUp(self):
         os.system('sh fireup.sh restart')
+        time.sleep(2)
         self.c1 = socket.socket()
         self.c1.connect(('127.0.0.1',1235))
 
@@ -32,83 +52,141 @@ class BoothTestCase(unittest.TestCase):
         self.c3.close()
         os.system('sh fireup.sh stop')
 
-    def kill(self, id):
-        os.system('''pkill -f "run.py %s"''' % id);
 
     def test_normal_renew(self):
-        time.sleep(4)
-        self.c1.sendall('lease list\n');
-        self.assertEqual(self.c1.recv(1024),'LOCALLY_UNKNOWN')
+        r = send_cmd(self.c1, 'lease list')
+        self.assertEqual(r,'LOCALLY_UNKNOWN')
 
-        self.c2.sendall('lease list\n');
+        self.c2.sendall('lease list\n')
         self.assertEqual(self.c2.recv(1024),'LOCALLY_UNKNOWN')
 
-        self.c3.sendall('lease list\n');
+        self.c3.sendall('lease list\n')
         self.assertEqual(self.c3.recv(1024),'LOCALLY_UNKNOWN')
 
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n');
-            r = parse_result(i.recv(1024));
+            i.sendall('lease acquire\n')
+            r = parse_result(i.recv(1024))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '0')
 
         time.sleep(35)
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n');
-            r = parse_result(i.recv(1024));
+            i.sendall('lease acquire\n')
+            r = parse_result(i.recv(1024))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '1')
 
         time.sleep(35)
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n');
-            r = parse_result(i.recv(1024));
+            i.sendall('lease acquire\n')
+            r = parse_result(i.recv(1024))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '2')
 
     def test_abandon_lease(self):
-        time.sleep(4)
 
-        self.c1.sendall('lease acquire\n');
-        r = parse_result(self.c1.recv(1024));
+        self.c1.sendall('lease acquire\n')
+        r = parse_result(self.c1.recv(1024))
         self.assertEqual(r['sid'], '1')
         self.assertEqual(r['epoch'], '0')
 
-        self.kill(2)
-        self.kill(3)
+        stop_booth(2)
+        stop_booth(3)
         time.sleep(65)
 
-        self.c1.sendall('lease list\n');
+        self.c1.sendall('lease list\n')
         self.assertEqual(self.c1.recv(1024), 'LOCALLY_UNKNOWN')
 
     def test_unormal(self):
-        time.sleep(4)
-        self.c1.sendall('lease acquire\n');
-        r = parse_result(self.c1.recv(1024));
+        self.c1.sendall('lease acquire\n')
+        r = parse_result(self.c1.recv(1024))
         self.assertEqual(r['sid'], '1')
         self.assertEqual(r['epoch'], '0')
 
-        self.kill(1)
+        stop_booth(1)
         time.sleep(65)
         for i in (self.c2, self.c3):
             i.sendall('lease list\n')
-            r = parse_result(i.recv(1024));
+            r = parse_result(i.recv(1024))
             self.assertEqual(r['sid'], '3')
             self.assertEqual(r['epoch'], '1')
 
-    def test_unormal_back(self):
-        time.sleep(4)
-        self.c3.sendall('lease acquire\n');
-        r = parse_result(self.c3.recv(1024));
+    def test_unormal_others_back(self):
+        self.c3.sendall('lease acquire\n')
+        r = parse_result(self.c3.recv(1024))
         self.assertEqual(r['sid'], '3')
         self.assertEqual(r['epoch'], '0')
 
-        self.kill(3)
+        stop_booth(1)
+
+        start_booth(1)
+
+        self.c1 = connect_client(1)
+        self.c1.sendall('lease slowlist\n')
+        r = parse_result(self.c1.recv(1024))
+        self.assertEqual(r['sid'], '3')
+        self.assertEqual(r['epoch'], '0')
 
 
+    def test_unormal_leader_back(self):
+        self.c3.sendall('lease acquire\n')
+        r = parse_result(self.c3.recv(1024))
+        self.assertEqual(r['sid'], '3')
+        self.assertEqual(r['epoch'], '0')
+
+        #lost leader
+        stop_booth(3)
+
+        time.sleep(10)
+
+        #leader back
+        start_booth(3)
+        self.c3 = connect_client(3)
+        self.c3.sendall('lease slowlist\n')
+        r = parse_result(self.c3.recv(1024))
+        self.assertEqual(r['sid'], '3')
+        self.assertEqual(r['epoch'], '0')
 
 
+    def test_normal_revoke(self):
+        send_cmd(self.c1, 'lease acquire')
 
+        revoke_time=''
+        for i in (self.c1, self.c2, self.c3):
+            r = send_cmd(i, 'lease revoke')
+            r = parse_result(r)
+            self.assertEqual(r['sid'], 'REVOKING')
+            self.assertEqual(r['epoch'], '1')
+            #the revoke time should be the same, it was
+            #caculated by the leader
+            if revoke_time:
+                self.assertEqual(r['timeout'], revoke_time)
+                revoke_time = r['timeout']
+
+    def test_unnormal_revoke(self):
+        send_cmd(self.c1, 'lease acquire')
+
+        send_cmd(self.c1, 'lease revoke')
+
+
+        stop_booth(1)
+        time.sleep(1)
+
+        start_booth(1)
+        self.c1 = connect_client(1)
+
+
+        revoke_time=''
+        for i in (self.c1, self.c2, self.c3):
+            r = send_cmd(i, 'lease slowlist')
+            r = parse_result(r)
+            self.assertEqual(r['sid'], 'REVOKING')
+            self.assertEqual(r['epoch'], '1')
+            #the revoke time should be the same, it was
+            #caculated by the leader
+            if revoke_time:
+                self.assertEqual(r['timeout'], revoke_time)
+                revoke_time = r['timeout']
 
 
 

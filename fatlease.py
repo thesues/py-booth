@@ -84,7 +84,11 @@ class Lease(object):
         self.timeout = None
         self.instance_number = None
     def __str__(self):
+        #localtime
         return "SID: %s, TIMEOUT: %s, epoch %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
+        #UTCtime
+        #return "SID: %s, TIMEOUT: %s, epoch %d" % (self.sid , time.asctime(time.gmtime(self.timeout)), self.instance_number)
+
 
 #when using recv, there are 2 different msg
 # 1. for acceptors , methods are PREPARE, ACCEPT , LEARN, RENEW: go to acceptor
@@ -129,7 +133,7 @@ class Acceptor(EventThread):
         try:
           while not is_all_connected():
               log.debug("wait to connect others")
-              sleep(3)
+              sleep(1)
               connect_all()
         except Timeout, t:
             if t is not timeout:

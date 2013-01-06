@@ -1,3 +1,4 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4 expandtab
 import conf
 import sys
 from fatlease import Acceptor

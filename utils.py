@@ -1,4 +1,4 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
+# vim: tabstop=4 shiftwidth=4 softtabstop=4 et
 class Server(object):
     def __init__(self, sid, address, port):
         self.sid = sid
