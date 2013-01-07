@@ -11,12 +11,8 @@ from controler import Controler
 
 
 if __name__  == '__main__':
-    myid = int(sys.argv[1])
-    if len(sys.argv) > 2:
-        conf.test_mode = True
 
-    conf.read_conf(myid)
-
+    conf.parse_cmdline(sys.argv[1:])
 
     delegate = Dispatcher()
     acceptor = Acceptor(delegate)

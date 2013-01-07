@@ -57,36 +57,26 @@ class BoothTestCase(unittest.TestCase):
         r = send_cmd(self.c1, 'lease list')
         self.assertEqual(r,'LOCALLY_UNKNOWN')
 
-        self.c2.sendall('lease list\n')
-        self.assertEqual(self.c2.recv(1024),'LOCALLY_UNKNOWN')
-
-        self.c3.sendall('lease list\n')
-        self.assertEqual(self.c3.recv(1024),'LOCALLY_UNKNOWN')
-
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n')
-            r = parse_result(i.recv(1024))
+            r = parse_result(send_cmd(i, 'lease acquire'))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '0')
 
         time.sleep(35)
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n')
-            r = parse_result(i.recv(1024))
+            r = parse_result(send_cmd(i, 'lease slowlist'))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '1')
 
         time.sleep(35)
         for i in (self.c1, self.c2, self.c3):
-            i.sendall('lease acquire\n')
-            r = parse_result(i.recv(1024))
+            r = parse_result(send_cmd(i, 'lease acquire'))
             self.assertEqual(r['sid'], '1')
             self.assertEqual(r['epoch'], '2')
 
     def test_abandon_lease(self):
 
-        self.c1.sendall('lease acquire\n')
-        r = parse_result(self.c1.recv(1024))
+        r = parse_result(send_cmd(self.c1, 'lease acquire'))
         self.assertEqual(r['sid'], '1')
         self.assertEqual(r['epoch'], '0')
 
@@ -94,26 +84,24 @@ class BoothTestCase(unittest.TestCase):
         stop_booth(3)
         time.sleep(65)
 
-        self.c1.sendall('lease list\n')
-        self.assertEqual(self.c1.recv(1024), 'LOCALLY_UNKNOWN')
+        r = send_cmd(self.c1, 'lease list')
+        self.assertEqual(r , 'LOCALLY_UNKNOWN')
 
     def test_unormal(self):
-        self.c1.sendall('lease acquire\n')
-        r = parse_result(self.c1.recv(1024))
+        r = send_cmd(self.c1 ,'lease acquire')
+        r = parse_result(r)
         self.assertEqual(r['sid'], '1')
         self.assertEqual(r['epoch'], '0')
 
         stop_booth(1)
         time.sleep(65)
         for i in (self.c2, self.c3):
-            i.sendall('lease list\n')
-            r = parse_result(i.recv(1024))
+            r = parse_result(send_cmd(i, 'lease list'))
             self.assertEqual(r['sid'], '3')
             self.assertEqual(r['epoch'], '1')
 
     def test_unormal_others_back(self):
-        self.c3.sendall('lease acquire\n')
-        r = parse_result(self.c3.recv(1024))
+        r = parse_result(send_cmd(self.c3, 'lease acquire'))
         self.assertEqual(r['sid'], '3')
         self.assertEqual(r['epoch'], '0')
 
@@ -122,15 +110,14 @@ class BoothTestCase(unittest.TestCase):
         start_booth(1)
 
         self.c1 = connect_client(1)
-        self.c1.sendall('lease slowlist\n')
-        r = parse_result(self.c1.recv(1024))
+        r = send_cmd(self.c1, 'lease slowlist')
+        r = parse_result(r)
         self.assertEqual(r['sid'], '3')
         self.assertEqual(r['epoch'], '0')
 
 
     def test_unormal_leader_back(self):
-        self.c3.sendall('lease acquire\n')
-        r = parse_result(self.c3.recv(1024))
+        r = parse_result(send_cmd(self.c3, 'lease acquire'))
         self.assertEqual(r['sid'], '3')
         self.assertEqual(r['epoch'], '0')
 
@@ -142,8 +129,7 @@ class BoothTestCase(unittest.TestCase):
         #leader back
         start_booth(3)
         self.c3 = connect_client(3)
-        self.c3.sendall('lease slowlist\n')
-        r = parse_result(self.c3.recv(1024))
+        r = parse_result(send_cmd(self.c3, 'lease slowlist'))
         self.assertEqual(r['sid'], '3')
         self.assertEqual(r['epoch'], '0')
 
