@@ -116,7 +116,7 @@ def check_conf(myid):
         #server_list as least has itself
         if myid not in server_list.keys():
             raise Exception("myid %s is not in server_list" % myid)
-        #
+        #others:
     except Exception, e:
         print e
         sys.exit(-1)

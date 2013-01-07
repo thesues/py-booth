@@ -1,8 +1,8 @@
 start() {
 rm -rf ../*.log
-python ../run.py 1 -t& 
-python ../run.py 2 -t&
-python ../run.py 3 -t&
+python ../run.py -c conf/1.conf & 
+python ../run.py -c conf/2.conf &
+python ../run.py -c conf/3.conf &
 sleep 2
 }
 

@@ -16,10 +16,10 @@ def parse_result(string):
 
 
 def stop_booth(id):
-    os.system('''pkill -f "run.py %s"''' % id)
+    os.system('''pkill -f "run.py -c conf/%s.conf"''' % id)
 
 def start_booth(id):
-    os.system("python ../run.py %s -t&" % id)
+    os.system("python ../run.py -c conf/%s.conf &" % id)
     time.sleep(2)
 
 def connect_client(id):

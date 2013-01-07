@@ -53,7 +53,7 @@ class BoothTestCase(unittest.TestCase):
 
         self.c1.sendall('network disconnect 3\n')
         self.c1.recv(1024)
-        time.sleep(1)
+        time.sleep(2)
 
         self.c1.sendall('network list\n')
         self.c2.sendall('network list\n')
