@@ -75,7 +75,7 @@ def read_conf(config_file):
             if k == 'client_port':
                 client_port = int(v)
             elif k == 'test_mode':
-                test_mode = bool(v)
+                test_mode = bool(int(v))
             elif k =='lease_timeout':
                 lease_timeout = int(v)
             elif k == 'd_max':
