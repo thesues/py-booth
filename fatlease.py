@@ -10,16 +10,18 @@ import logging as log
 from eventlet import sleep, Timeout
 from eventlet import kill
 import conf
+import hmac
 
 
 
-VERSION = (0,0,1)
+VERSION = '001'
+
+
 
 #renew is much like prepare, but it requires acceptor to check
 #the previous instance_number
 PREPARE, LEARN, ACCEPT, RENEW = ('PREPARE', 'LEARN', 'ACCEPT', 'RENEW')
 
-ECHO_PREPARE, ECHO_ACCEPT = ('ECHO_PREPARE', 'ECHO_ACCEPT')
 
 ACK, NACK, OUTDATE = ('ACK', 'NACK', 'OUTDATE')
 
@@ -33,23 +35,42 @@ class Message(object):
     def __init__(self, **kwargs):
         self.method = kwargs.get('method')
         self.sid = kwargs.get('sid')
-        self.suggested_host_timeout= kwargs.get('suggested_host_timeout')
+        self.suggested_host_timeout = kwargs.get('suggested_host_timeout')
         self.suggested_host = kwargs.get('suggested_host')
         self.ballot = kwargs.get('ballot')
         self.instance_number = kwargs.get('instance_number')
-        self.echo= kwargs.get('echo')
+        self.echo = kwargs.get('echo')
+        #
+        #
+        self.version = VERSION
+        self.timestamp = get_utc_time()
+
+    def build_base_string(self):
+        return "method%s?sid%s?suggested_host_timeout%s?suggested_host%s?ballot%s?instance_number%s?echo%s?version%s?timestamp%s" % (self.method, self.sid, self.suggested_host_timeout, self.suggested_host,
+                self.ballot, self.instance_number, self.echo, self.version, self.timestamp)
+
+    def build_hmac_signature(self):
+        base_str = self.build_base_string()
+        return hmac.new(conf.secret_key, base_str).hexdigest()
+
     def add_sid(self, sid):
         self.sid = sid
-    def add_echo(self,state):
-        self.echo = state
+
+    def add_echo(self, echo):
+        self.echo = echo
+
     def enpack(self):
         msg = json.dumps(dict(method=self.method,sid=self.sid,
             ballot=self.ballot, suggested_host=self.suggested_host,
             suggested_host_timeout=self.suggested_host_timeout,
             instance_number=self.instance_number,
-            echo=self.echo
+            echo=self.echo,
+            timestamp=self.timestamp,
+            version=self.version,
+            signature=self.build_hmac_signature()
             ))
         return msg
+
     #TODO depack format check
     def depack(self, d):
         d.strip()
@@ -58,6 +79,12 @@ class Message(object):
         except:
             log.error('parse json error:%s' % d)
             return False
+
+        #for package check
+        self.timestamp = data.get('timestamp')
+        self.version = data.get('version')
+        self.signature = data.get('signature')
+
         #must hava the 2 element below
         self.method = data['method']
         self.sid= data['sid']
@@ -68,7 +95,10 @@ class Message(object):
         self.suggested_host = data.get('suggested_host')
         self.suggested_host_timeout = data.get('suggested_host_timeout')
         self.echo = data.get('echo')
+
         return True
+
+
     def __str__(self):
         return self.enpack();
 
@@ -103,7 +133,21 @@ class Dispatcher(EventThread):
             u = do_recv()
             m = Message()
             if not m.depack(u):
+                log.debug('depack %s error', u)
                 continue
+            #check timestamp
+            if m.timestamp - get_utc_time() > conf.proposer_timeout:
+                log.debug('receive expired package, drop it')
+                continue
+            #check version
+            if m.version != VERSION:
+                log.debug('version not match')
+                continue
+            #check signature
+            if m.signature != m.build_hmac_signature():
+                log.info('message signature failed, may changed in network')
+                continue
+
             if m.method in (PREPARE, ACCEPT, LEARN, RENEW):
                 self.acceptor_queue.put(m)
             elif m.method in (NACK, ACK, OUTDATE):
@@ -230,7 +274,7 @@ class Acceptor(EventThread):
 
             #update dict to add sid
         m.add_sid(conf.myself.sid)
-        m.add_echo(ECHO_PREPARE)
+        m.add_echo(msg.timestamp)
         do_send(msg.sid, m.enpack())
         log.debug('ACCEPTOR: response from on_prepare %s', m.enpack())
 
@@ -284,7 +328,7 @@ class Acceptor(EventThread):
                     instance_number=self.instance_number)
 
         m.add_sid(conf.myself.sid)
-        m.add_echo(ECHO_ACCEPT)
+        m.add_echo(msg.timestamp)
         log.debug('ACCEPTOR: response from on_accept %s', m.enpack())
         do_send(msg.sid, m.enpack())
 
@@ -463,7 +507,8 @@ class Proposer():
             #TODO some timeout maybe happen,to return failed
             #must be ECHO_PREPARE
             recv_msg = self.queue.get()
-            if recv_msg.echo != ECHO_PREPARE:
+            if recv_msg.echo != prepare_msg.timestamp:
+                log.debug('proposer accepted not my wished')
                 continue
 
             if recv_msg.method == OUTDATE and recv_msg.instance_number > instance_number:
@@ -541,7 +586,11 @@ class Proposer():
         get_majority_accept = False
         while True:
             recv_msg = self.queue.get()
-            if recv_msg.echo != ECHO_ACCEPT:
+            if recv_msg.echo != accept_msg.timestamp:
+                log.debug('proposer receive a not wished package')
+                log.debug('recv_msg.echo %s, accept_msg')
+                log.debug('proposer receive a not wished package')
+
                 continue
 
             if recv_msg.method == ACK and \
@@ -840,6 +889,7 @@ def get_utc_time():
     d = datetime.utcnow()
     return calendar.timegm(d.utctimetuple())
 
+#TODO
 class CheckUTCTime(EventThread):
     def _run(self):
         pass

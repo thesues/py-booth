@@ -16,6 +16,7 @@ require_retry_times = 3
 proposer_timeout = 40
 renew_internal = 30
 client_port = 1234
+secret_key = 'booth'
 
 #http://stackoverflow.com/questions/2819696/parsing-properties-file-in-python/2819788#2819788
 class FakeSecHead(object):
@@ -57,6 +58,7 @@ def read_conf(config_file):
     global require_retry_times
     global proposer_timeout
     global renew_internal
+    global secret_key
 
 
     myid = None
@@ -86,6 +88,8 @@ def read_conf(config_file):
                 renew_internal = int(v)
             elif k == 'myid':
                 myid = int(v)
+            elif k == 'secret_key':
+                secret_key = v
             elif k.startswith('server'):
                 sid = k.split('.')[1]
                 ip,port = v.split(':')
@@ -100,7 +104,7 @@ def read_conf(config_file):
     finally:
         config_file.close()
 
-    check_conf(myid)
+    check_config(myid)
 
 
     if test_mode:
@@ -111,16 +115,14 @@ def read_conf(config_file):
     myself = server_list.get(myid)
 
 
-def check_conf(myid):
+def check_config(myid):
     try:
-        #server_list as least has itself
         if myid not in server_list.keys():
             raise Exception("myid %s is not in server_list" % myid)
-        #others:
+        if renew_internal >= lease_timeout:
+            raise Exception('renew_internal is bigger than lease timeout')
     except Exception, e:
         print e
         sys.exit(-1)
-
-
 
 

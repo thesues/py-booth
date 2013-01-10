@@ -483,12 +483,6 @@ network send %s %s
             sock.close()
 
 
-#TODO add a magic number
-#TODO add add timer function
-class HeartBeat(EventThread):
-    pass
-
-
 class Controler(object):
     def __init__(self):
         self.thread_list=[]
