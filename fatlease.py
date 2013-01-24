@@ -305,7 +305,6 @@ class Acceptor(EventThread):
         elif msg.ballot >= self.ballot:
             #acceptor votes for proposal
             log.info('ACCEPTOR: acceptor has voted for proposal, now accept')
-            log.info('ACCEPTOR: acceptor get %s', msg)
             self.accepted_lease.sid = msg.suggested_host
             self.accepted_lease.timeout = msg.suggested_host_timeout
             #TODO
@@ -841,6 +840,17 @@ class LeaseAdmin(Admin):
     def __init__(self,port, lease_manager):
          super(LeaseAdmin, self).__init__(port)
          self.lease_manager = lease_manager
+
+    def help(self):
+        lease_help = '''
+lease list
+lease slowlist
+lease revoke
+lease acquire
+lease revoke
+'''
+
+        return lease_help + super(LeaseAdmin, self).help()
 
     #decorator
     def check_acceptor_running(func):
