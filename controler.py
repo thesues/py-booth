@@ -304,13 +304,14 @@ def public(func):
 class Admin(EventThread):
     def __init__(self, port):
         self._port = port
-        self._help = '''
-network list
-network connect %s
-network disconnect %s
-network send %s %s
-'''
 
+    def help(self):
+        return '''
+network list
+network connect <sid>
+network disconnect <sid>
+network send <sid> <msg>
+'''
     def _run(self):
         log.info('========= START ADMIN %s:%d ========', conf.myself.address, self._port)
         self.localserver = eventlet.listen((conf.myself.address, self._port))
@@ -441,7 +442,7 @@ network send %s %s
                 #easy to extends function
                 if len(u) == 1:
                     if msg == 'help':
-                        channel.write(self._help)
+                        channel.write(self.help())
                         channel.flush()
                         continue
                     elif msg == 'shutdown':
