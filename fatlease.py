@@ -108,11 +108,11 @@ class Lease(object):
         self.sid = sid
         self.timeout = timeout
         #no meaning in accepted lease
-        self.instance_number = -1
+        self.instance_number = 0
     def set_none(self):
         self.sid = None
         self.timeout = None
-        self.instance_number = None
+        self.instance_number = 0
     def __str__(self):
         #localtime
         return "SID: %s, TIMEOUT: %s, epoch %d" % (self.sid , time.ctime(self.timeout), self.instance_number)
@@ -159,7 +159,6 @@ class Acceptor(EventThread):
         self.ballot = 0
         self.last_lease = Lease(None, None)
         self.accepted_lease = Lease(None, None)
-        self.instance_number = 0
         self.queue = dispatcher.acceptor_queue
         self.running = False
         #need to update proposer's data
@@ -168,7 +167,7 @@ class Acceptor(EventThread):
         self.lease_manager = manager
 
     def get_instance_number(self):
-        return self.instance_number
+        return self.accepted_lease.instance_number
 
     def _run(self):
         timeout = Timeout(conf.lease_timeout)
@@ -203,19 +202,19 @@ class Acceptor(EventThread):
         #maybe RENEW and PREPARE
         log.info('ACCEPTOR: start on_%s', msg.method)
         log.debug('GET msg %s', msg)
-        #if msg.instance_number < self.instance_number and self.last_lease.sid == None:
-        if msg.instance_number < self.instance_number:
+        #if msg.instance_number < self.accepted_lease.instance_number and self.last_lease.sid == None:
+        if msg.instance_number < self.accepted_lease.instance_number:
             log.info('ACCEPTOR: proposer has missed some instance')
             #proposer has missed some instance
             m = Message(method=OUTDATE,
                     suggested_host=self.accepted_lease.sid,
                     suggested_host_timeout=self.accepted_lease.timeout,
                     ballot=self.ballot,
-                    instance_number=self.instance_number)
+                    instance_number=self.accepted_lease.instance_number)
             #SEND OUTDATE(None, local_lamda_acc, local_ballot,
             #local_instance_nubmer
         else:
-            if  msg.instance_number > self.instance_number:
+            if  msg.instance_number > self.accepted_lease.instance_number:
                 #local acceptor has missed some instacne
                 #work instance_number or last lease instance_number?
                 if msg.method == RENEW and self.last_lease.sid and \
@@ -225,7 +224,7 @@ class Acceptor(EventThread):
                     self.accepted_lease.sid = self.last_lease.sid
                     self.accepted_lease.timeout = self.last_lease.timeout
                     self.ballot = msg.ballot
-                    self.instance_number = msg.instance_number
+                    self.accepted_lease.instance_number = msg.instance_number
                     m = Message(method=ACK,
                             ballot=msg.ballot,
                             instance_number=msg.instance_number,
@@ -236,7 +235,7 @@ class Acceptor(EventThread):
                     self.accepted_lease.set_none()
                     self.last_lease.set_none()
                     self.ballot = msg.ballot
-                    self.instance_number = msg.instance_number
+                    self.accepted_lease.instance_number = msg.instance_number
                     m = Message(method=ACK,
                             ballot=msg.ballot,
                             instance_number=msg.instance_number,
@@ -248,7 +247,7 @@ class Acceptor(EventThread):
                 log.info('ACCEPTOR: acceptor has seen a newer proposal')
                 m = Message(method=NACK,
                         ballot=self.ballot,
-                        instance_number=self.instance_number,
+                        instance_number=self.accepted_lease.instance_number,
                         suggested_host=None,
                         suggested_host_timeout=None)
             else:
@@ -280,24 +279,24 @@ class Acceptor(EventThread):
 
     def on_accept(self,msg):
         log.info('ACCEPTOR: start on_accept')
-        if msg.instance_number < self.instance_number:
+        if msg.instance_number < self.accepted_lease.instance_number:
             #acceptor dose not vote for values in outdated instance
             log.info('ACCEPTOR: acceptor dose not vote for values in outdated instance')
 
             m = Message(method=NACK,
-                    instance_number=self.instance_number)
+                    instance_number=self.accepted_lease.instance_number)
 
-        elif msg.instance_number > self.instance_number:
+        elif msg.instance_number > self.accepted_lease.instance_number:
             #acceptor has missed instance and votes for value
             log.info('ACCEPTOR: acceptor has missed instance and votes for value')
             self.last_lease.set_none()
             self.accepted_lease.sid = msg.suggested_host
             self.accepted_lease.timeout= msg.suggested_host_timeout
             self.ballot = msg.ballot
-            self.instance_number = msg.instance_number
+            self.accepted_lease.instance_number = msg.instance_number
             #SEND ACK
             m = Message(method=ACK,
-                    instance_number=self.instance_number,
+                    instance_number=self.accepted_lease.instance_number,
                     suggested_host=self.accepted_lease.sid,
                     suggested_host_timeout=self.accepted_lease.timeout,
                     ballot=self.ballot)
@@ -315,7 +314,7 @@ class Acceptor(EventThread):
 
             #SEND ACK
             m = Message(method=ACK,
-                    instance_number=self.instance_number,
+                    instance_number=self.accepted_lease.instance_number,
                     suggested_host=self.accepted_lease.sid,
                     suggested_host_timeout=self.accepted_lease.timeout,
                     ballot=msg.ballot)
@@ -325,7 +324,7 @@ class Acceptor(EventThread):
             #SEND NACK
             log.info('ACCEPTOR: acceptor has seen newer proposal and connot accept')
             m = Message(method=NACK,
-                    instance_number=self.instance_number)
+                    instance_number=self.accepted_lease.instance_number)
 
         m.add_sid(conf.myself.sid)
         m.add_echo(msg.timestamp)
@@ -337,14 +336,14 @@ class Acceptor(EventThread):
         log.info('ACCEPTOR: start on_learn')
         tmp_last_lease_timeout = self.last_lease.timeout
 
-        if msg.instance_number > self.instance_number:
+        if msg.instance_number > self.accepted_lease.instance_number:
             log.info('ACCEPTOR: instance number is unknown and needs to be created')
             self.last_lease.sid = msg.suggested_host
             self.last_lease.timeout = msg.suggested_host_timeout
             self.accepted_lease.sid = None
             self.ballot = 0
-            self.instance_number = msg.instance_number
-        elif msg.instance_number == self.instance_number:
+            self.accepted_lease.instance_number = msg.instance_number
+        elif msg.instance_number == self.accepted_lease.instance_number:
             log.info(msg)
             log.info('ACCEPTOR: instance number is known')
             log.info('the consensus outcome (lease) is stored in the instance')
@@ -353,7 +352,7 @@ class Acceptor(EventThread):
             #when in revoke situation, this is usefull
             self.last_lease.sid = msg.suggested_host
             self.last_lease.timeout = msg.suggested_host_timeout
-            self.last_lease.instance_number = self.instance_number
+            self.last_lease.instance_number = self.accepted_lease.instance_number
 
         #fire timer
         #if I have the lease, start a renew process
