@@ -2,7 +2,10 @@
 from datetime import datetime
 import calendar
 import time
-import simplejson as json
+try:
+    import simplejson as json
+except:
+    import json
 import functools
 from controler import EventThread, do_recv, do_send, Admin, public, is_all_connected, connect_all
 from eventlet import Queue
